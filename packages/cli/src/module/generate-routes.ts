@@ -6,6 +6,7 @@ import { DefaultRouteGenerator } from '../routeGeneration/defaultRouteGenerator'
 import { fsMkDir } from '../utils/fs';
 import path = require('path');
 import { Config as BaseConfig } from "@tsoa/runtime";
+import { FastifyRouteGenerator } from '../routeGeneration/fastifyRouteGenerator';
 
 export async function generateRoutes<Config extends ExtendedRoutesConfig>(
   routesConfig: Config,
@@ -49,7 +50,10 @@ async function getRouteGenerator<Config extends ExtendedRoutesConfig>(metadata: 
       return new routeGenerator(metadata, routesConfig);
     }
   }
-  if (routesConfig.middleware !== undefined || routesConfig.middlewareTemplate !== undefined) {
+
+  if (routesConfig.middleware === 'fastify') {
+    return new FastifyRouteGenerator(metadata, routesConfig);
+  } else if (routesConfig.middleware !== undefined || routesConfig.middlewareTemplate !== undefined) {
     return new DefaultRouteGenerator(metadata, routesConfig);
   } else {
     routesConfig.middleware = 'express';
