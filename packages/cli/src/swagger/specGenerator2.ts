@@ -1,9 +1,12 @@
-import { ExtendedSpecConfig } from '../cli';
+import { merge as mergeAnything } from 'merge-anything'
+import { merge as deepMerge } from 'ts-deepmerge';
 import { Tsoa, assertNever, Swagger } from '@tsoa/runtime';
-import { isVoidType } from '../utils/isVoidType';
-import { convertColonPathParams, normalisePath } from './../utils/pathUtils';
-import { DEFAULT_REQUEST_MEDIA_TYPE, DEFAULT_RESPONSE_MEDIA_TYPE, getValue } from './../utils/swaggerUtils';
+
 import { SpecGenerator } from './specGenerator';
+import { ExtendedSpecConfig } from '../cli';
+import { isVoidType } from '../utils/isVoidType';
+import { convertColonPathParams, normalisePath } from '../utils/pathUtils';
+import { DEFAULT_REQUEST_MEDIA_TYPE, DEFAULT_RESPONSE_MEDIA_TYPE, getValue } from '../utils/swaggerUtils';
 import { UnspecifiedObject } from '../utils/unspecifiedObject';
 import { shouldIncludeValidatorInSchema } from '../utils/validatorUtils';
 
@@ -64,8 +67,8 @@ export class SpecGenerator2 extends SpecGenerator {
       this.config.specMerging = this.config.specMerging || 'immediate';
       const mergeFuncs: { [key: string]: any } = {
         immediate: Object.assign,
-        recursive: require('merge-anything').merge,
-        deepmerge: (spec: UnspecifiedObject, merge: UnspecifiedObject): UnspecifiedObject => require('deepmerge').all([spec, merge]),
+        recursive: mergeAnything,
+        deepmerge: (spec: UnspecifiedObject, merge: UnspecifiedObject): UnspecifiedObject => deepMerge(spec, merge),
       };
 
       spec = mergeFuncs[this.config.specMerging](spec, this.config.spec);
@@ -82,7 +85,7 @@ export class SpecGenerator2 extends SpecGenerator {
     Object.keys(this.metadata.referenceTypeMap).map(typeName => {
       const referenceType = this.metadata.referenceTypeMap[typeName];
       if (referenceType.dataType === 'refObject') {
-        const required = referenceType.properties.filter(p => p.required && !this.hasUndefined(p)).map(p => p.name);
+        const required = referenceType.properties.filter(p => this.isRequiredWithoutDefault(p) && !this.hasUndefined(p)).map(p => p.name);
         definitions[referenceType.refName] = {
           description: referenceType.description,
           properties: this.buildProperties(referenceType.properties),
@@ -281,7 +284,7 @@ export class SpecGenerator2 extends SpecGenerator {
         properties[p.name].description = p.description;
         properties[p.name].example = p.example === undefined ? undefined : p.example[0];
 
-        if (p.required) {
+        if (this.isRequiredWithoutDefault(p)) {
           required.push(p.name);
         }
       });
@@ -320,7 +323,7 @@ export class SpecGenerator2 extends SpecGenerator {
       description: source.description,
       in: source.in,
       name: source.name,
-      required: source.required,
+      required: this.isRequiredWithoutDefault(source),
     } as Swagger.Parameter2;
     if (source.deprecated) {
       parameter['x-deprecated'] = true;
@@ -478,7 +481,7 @@ export class SpecGenerator2 extends SpecGenerator {
   }
 
   protected getSwaggerTypeForReferenceType(referenceType: Tsoa.ReferenceType): Swagger.BaseSchema {
-    return { $ref: `#/definitions/${referenceType.refName}` };
+    return { $ref: `#/definitions/${encodeURIComponent(referenceType.refName)}` };
   }
 
   private decideEnumType(anEnum: Array<string | number>, nameOfEnum: string): 'string' | 'number' {

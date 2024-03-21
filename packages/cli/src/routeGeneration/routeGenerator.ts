@@ -76,6 +76,7 @@ export abstract class AbstractRouteGenerator<Config extends ExtendedRoutesConfig
     const canImportByAlias = true;
 
     const normalisedBasePath = normalisePath(this.options.basePath as string, '/');
+
     return {
       authenticationModule,
       basePath: normalisedBasePath,
@@ -93,7 +94,7 @@ export abstract class AbstractRouteGenerator<Config extends ExtendedRoutesConfig
 
             const normalisedFullPath = normalisePath(`${normalisedBasePath}${normalisedControllerPath}${normalisedMethodPath}`, '/', '', false);
 
-            const uploadFileParameter = method.parameters.find(parameter => parameter.type.dataType === 'file');
+            const uploadFilesWithDifferentFieldParameter = method.parameters.filter(parameter => parameter.type.dataType === 'file');
             const uploadFilesParameter = method.parameters.find(parameter => parameter.type.dataType === 'array' && parameter.type.elementType.dataType === 'file');
 
             // deep clone to prevent changes on original tsoa object
@@ -119,8 +120,10 @@ export abstract class AbstractRouteGenerator<Config extends ExtendedRoutesConfig
               name: method.name,
               parameters: parameterObjs,
               path: normalisedMethodPath,
-              uploadFile: !!uploadFileParameter,
-              uploadFileName: uploadFileParameter?.name,
+              uploadFile: uploadFilesWithDifferentFieldParameter.length > 0,
+              uploadFileName: uploadFilesWithDifferentFieldParameter.map((parameter) => ({
+                  'name': parameter.name,
+              })),
               uploadFiles: !!uploadFilesParameter,
               uploadFilesName: uploadFilesParameter?.name,
               security: method.security,
@@ -165,8 +168,26 @@ export abstract class AbstractRouteGenerator<Config extends ExtendedRoutesConfig
   }
 
   protected getRelativeImportPath(fileLocation: string) {
-    fileLocation = fileLocation.replace(/.ts$/, ''); // no ts extension in import
-    return `./${path.relative(this.options.routesDir, fileLocation).replace(/\\/g, '/')}${this.options.esm ? '.js' : ''}`;
+    const currentExt = path.extname(fileLocation);
+    let newExtension = '';
+
+    if (this.options.esm) {
+      switch (currentExt) {
+        case '.ts':
+        default:
+          newExtension = '.js';
+          break;
+        case '.mts':
+          newExtension = '.mjs';
+          break;
+        case '.cts':
+          newExtension = '.cjs';
+          break;
+      }
+    }
+
+    fileLocation = fileLocation.replace(/\.(ts|mts|cts)$/, ''); // no ts extension in import
+    return `./${path.relative(this.options.routesDir, fileLocation).replace(/\\/g, '/')}${newExtension}`;
   }
 
   protected buildPropertySchema(source: Tsoa.Property): TsoaRoute.PropertySchema {

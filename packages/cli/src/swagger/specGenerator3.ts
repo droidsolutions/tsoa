@@ -1,11 +1,14 @@
+import { Swagger, Tsoa, assertNever } from '@tsoa/runtime';
+import { merge as mergeAnything } from 'merge-anything';
+import { merge as deepMerge } from 'ts-deepmerge';
+
 import { ExtendedSpecConfig } from '../cli';
-import { Tsoa, assertNever, Swagger } from '@tsoa/runtime';
 import { isVoidType } from '../utils/isVoidType';
+import { UnspecifiedObject } from '../utils/unspecifiedObject';
+import { shouldIncludeValidatorInSchema } from '../utils/validatorUtils';
 import { convertColonPathParams, normalisePath } from './../utils/pathUtils';
 import { DEFAULT_REQUEST_MEDIA_TYPE, DEFAULT_RESPONSE_MEDIA_TYPE, getValue } from './../utils/swaggerUtils';
 import { SpecGenerator } from './specGenerator';
-import { UnspecifiedObject } from '../utils/unspecifiedObject';
-import { shouldIncludeValidatorInSchema } from '../utils/validatorUtils';
 
 /**
  * TODO:
@@ -17,7 +20,10 @@ import { shouldIncludeValidatorInSchema } from '../utils/validatorUtils';
  * Also accept OpenAPI 3.0.0 metadata, like components/securitySchemes instead of securityDefinitions
  */
 export class SpecGenerator3 extends SpecGenerator {
-  constructor(protected readonly metadata: Tsoa.Metadata, protected readonly config: ExtendedSpecConfig) {
+  constructor(
+    protected readonly metadata: Tsoa.Metadata,
+    protected readonly config: ExtendedSpecConfig,
+  ) {
     super(metadata, config);
   }
 
@@ -35,8 +41,8 @@ export class SpecGenerator3 extends SpecGenerator {
       this.config.specMerging = this.config.specMerging || 'immediate';
       const mergeFuncs: { [key: string]: any } = {
         immediate: Object.assign,
-        recursive: require('merge-anything').merge,
-        deepmerge: (spec: UnspecifiedObject, merge: UnspecifiedObject): UnspecifiedObject => require('deepmerge').all([spec, merge]),
+        recursive: mergeAnything,
+        deepmerge: (spec: UnspecifiedObject, merge: UnspecifiedObject): UnspecifiedObject => deepMerge(spec, merge),
       };
 
       spec = mergeFuncs[this.config.specMerging](spec, this.config.spec);
@@ -151,7 +157,7 @@ export class SpecGenerator3 extends SpecGenerator {
       const referenceType = this.metadata.referenceTypeMap[typeName];
 
       if (referenceType.dataType === 'refObject') {
-        const required = referenceType.properties.filter(p => p.required && !this.hasUndefined(p)).map(p => p.name);
+        const required = referenceType.properties.filter(p => this.isRequiredWithoutDefault(p) && !this.hasUndefined(p)).map(p => p.name);
         schema[referenceType.refName] = {
           description: referenceType.description,
           properties: this.buildProperties(referenceType.properties),
@@ -369,7 +375,7 @@ export class SpecGenerator3 extends SpecGenerator {
             headers[each.name] = {
               schema: this.getSwaggerType(each.type) as Swagger.Schema3,
               description: each.description,
-              required: each.required,
+              required: this.isRequiredWithoutDefault(each),
             };
           });
         } else {
@@ -393,7 +399,7 @@ export class SpecGenerator3 extends SpecGenerator {
     for (const parameter of parameters) {
       const mediaType = this.buildMediaType(controllerName, method, parameter);
       properties[parameter.name] = mediaType.schema!;
-      if (parameter.required) {
+      if (this.isRequiredWithoutDefault(parameter)) {
         required.push(parameter.name);
       }
       if (parameter.deprecated) {
@@ -423,7 +429,7 @@ export class SpecGenerator3 extends SpecGenerator {
 
     const requestBody: Swagger.RequestBody = {
       description: parameter.description,
-      required: parameter.required,
+      required: this.isRequiredWithoutDefault(parameter),
       content: {
         [consumes]: mediaType,
       },
@@ -481,7 +487,7 @@ export class SpecGenerator3 extends SpecGenerator {
       description: source.description,
       in: source.in,
       name: source.name,
-      required: source.required,
+      required: this.isRequiredWithoutDefault(source),
       schema: {
         default: source.default,
         format: undefined,
@@ -572,7 +578,7 @@ export class SpecGenerator3 extends SpecGenerator {
   }
 
   protected getSwaggerTypeForReferenceType(referenceType: Tsoa.ReferenceType): Swagger.BaseSchema {
-    return { $ref: `#/components/schemas/${referenceType.refName}` };
+    return { $ref: `#/components/schemas/${encodeURIComponent(referenceType.refName)}` };
   }
 
   protected getSwaggerTypeForPrimitiveType(dataType: Tsoa.PrimitiveTypeLiteral): Swagger.Schema {
@@ -657,6 +663,13 @@ export class SpecGenerator3 extends SpecGenerator {
         if (swaggerType.$ref) {
           return { allOf: [swaggerType], nullable };
         }
+
+        // Note that null must be explicitly included in the list of enum values. Using nullable: true alone is not enough here.
+        // https://swagger.io/docs/specification/data-models/enums/
+        if (swaggerType.enum) {
+          swaggerType.enum.push(null);
+        }
+
         return { ...(title && { title }), ...swaggerType, nullable };
       } else {
         return { ...(title && { title }), anyOf: actualSwaggerTypes, nullable };

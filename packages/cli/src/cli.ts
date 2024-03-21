@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import YAML from 'yamljs';
+import YAML from 'yaml';
 import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import { Config, RoutesConfig, SpecConfig, Tsoa } from '@tsoa/runtime';
@@ -52,7 +52,8 @@ const getConfig = async (configPath = 'tsoa.json'): Promise<Config> => {
   const ext = extname(configPath);
   try {
     if (ext === '.yaml' || ext === '.yml') {
-      config = YAML.load(configPath);
+      const configRaw = await fsReadFile(`${workingDir}/${configPath}`);
+      config = YAML.parse(configRaw.toString('utf8'));
     } else if (ext === '.js') {
       config = await import(`${workingDir}/${configPath}`);
     } else {
@@ -375,7 +376,7 @@ export async function generateSpecAndRoutes(args: SwaggerArgs, metadata?: Tsoa.M
     const swaggerConfig = await validateSpecConfig(config);
 
     if (!metadata) {
-      metadata = new MetadataGenerator(config.entryFile, compilerOptions, config.ignore, config.controllerPathGlobs, config.spec.rootSecurity, config.defaultNumberType).Generate();
+      metadata = new MetadataGenerator(config.entryFile, compilerOptions, config.ignore, config.controllerPathGlobs, config.spec.rootSecurity, config.defaultNumberType, config.routes.esm).Generate();
     }
 
     await Promise.all([generateRoutes(routesConfig, compilerOptions, config.ignore, metadata), generateSpec(swaggerConfig, compilerOptions, config.ignore, metadata)]);

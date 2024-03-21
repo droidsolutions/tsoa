@@ -1,9 +1,13 @@
+import { File } from '@tsoa/runtime';
 import { expect } from 'chai';
+import { readFileSync } from 'fs';
 import 'mocha';
+import { resolve } from 'path';
 import * as request from 'supertest';
 import { base64image } from '../fixtures/base64image';
+import { stateOf } from '../fixtures/controllers/middlewaresExpressController';
+import { state } from '../fixtures/controllers/middlewaresHierarchyController';
 import { app } from '../fixtures/express/server';
-import { File } from '@tsoa/runtime';
 import {
   Gender,
   GenericModel,
@@ -16,10 +20,6 @@ import {
   ValidateMapStringToNumber,
   ValidateModel,
 } from '../fixtures/testModel';
-import { stateOf } from '../fixtures/controllers/middlewaresExpressController';
-import { state } from '../fixtures/controllers/middlewaresHierarchyController';
-import { readFileSync } from 'fs';
-import { resolve } from 'path';
 
 const basePath = '/v1';
 
@@ -434,6 +434,7 @@ describe('Express Server', () => {
       (_err, _res) => {
         expect(stateOf('route')).to.be.true;
         expect(stateOf('test1')).to.be.true;
+        expect(stateOf('test2')).to.be.true;
       },
       204,
     );
@@ -444,7 +445,7 @@ describe('Express Server', () => {
     return verifyGetRequest(
       basePath + '/MiddlewareHierarchyTestExpress/test1',
       (_err, _res) => {
-        const expected = ['base', 'intermediate', 'route', 'test1'];
+        const expected = ['base', 'intermediate', 'route', 'test1', 'test2'];
         expect(state()).to.eql(expected);
       },
       204,
@@ -717,7 +718,7 @@ describe('Express Server', () => {
         basePath + `/Validate/parameter/boolean?boolValue=${value}`,
         (err, _res) => {
           const body = JSON.parse(err.text);
-          expect(body.fields.boolValue.message).to.equal('invalid boolean value');
+          expect(body.fields.boolValue.message).to.equal('boolValue');
           expect(body.fields.boolValue.value).to.equal(value);
         },
         400,
@@ -1180,6 +1181,22 @@ describe('Express Server', () => {
         });
       });
 
+      it('returns response with header set in authentication middleware', () => {
+        return verifyGetRequest(basePath + '/SecurityTest?access_token=def123456', (_err, res) => {
+          expect(res.headers['some-header']).to.equal('someValueFromAuthenticationMiddleware');
+        });
+      });
+
+      it('returns custom response set in authentication middleware', () => {
+        return verifyGetRequest(
+          basePath + '/SecurityTest?access_token=ghi123456',
+          (_err, res) => {
+            expect(res.text).to.equal('some custom response');
+          },
+          401,
+        );
+      });
+
       it('returns 401 for an invalid key', () => {
         return verifyGetRequest(basePath + '/SecurityTest?access_token=invalid', emptyHandler, 401);
       });
@@ -1323,6 +1340,26 @@ describe('Express Server', () => {
         expect(model.age).to.equal(45);
         expect(model.human).to.equal(true);
         expect(model.gender).to.equal('MALE');
+      });
+    });
+
+    it('parse request filed parameters', () => {
+      const data: ParameterTestModel = {
+        age: 26,
+        firstname: 'Nick',
+        lastname: 'Yang',
+        gender: Gender.MALE,
+        human: true,
+        weight: 50,
+      };
+      return verifyPostRequest(`${basePath}/ParameterTest/RequestProps`, data, (_err, res) => {
+        const model = res.body as ParameterTestModel;
+        expect(model.age).to.equal(26);
+        expect(model.firstname).to.equal('Nick');
+        expect(model.lastname).to.equal('Yang');
+        expect(model.gender).to.equal(Gender.MALE);
+        expect(model.weight).to.equal(50);
+        expect(model.human).to.equal(true);
       });
     });
 
@@ -1492,6 +1529,67 @@ describe('Express Server', () => {
 
       return verifyFileUploadRequest(basePath + '/PostTest/ManyFilesAndFormFields', formData, (_err, res) => {
         for (const file of res.body as File[]) {
+          const packageJsonBuffer = readFileSync(resolve(__dirname, `../${file.originalname}`));
+          const returnedBuffer = Buffer.from(file.buffer);
+          expect(file).to.not.be.undefined;
+          expect(file.fieldname).to.be.not.undefined;
+          expect(file.originalname).to.be.not.undefined;
+          expect(file.encoding).to.be.not.undefined;
+          expect(file.mimetype).to.equal('application/json');
+          expect(Buffer.compare(returnedBuffer, packageJsonBuffer)).to.equal(0);
+        }
+      });
+    });
+
+    it('can post multiple files with different field', () => {
+      const formData = {
+        file_a: '@../package.json',
+        file_b: '@../tsconfig.json',
+      };
+      return verifyFileUploadRequest(`${basePath}/PostTest/ManyFilesInDifferentFields`, formData, (_err, res) => {
+        for (const file of res.body as File[]) {
+          const packageJsonBuffer = readFileSync(resolve(__dirname, `../${file.originalname}`));
+          const returnedBuffer = Buffer.from(file.buffer);
+          expect(file).to.not.be.undefined;
+          expect(file.fieldname).to.be.not.undefined;
+          expect(file.originalname).to.be.not.undefined;
+          expect(file.encoding).to.be.not.undefined;
+          expect(file.mimetype).to.equal('application/json');
+          expect(Buffer.compare(returnedBuffer, packageJsonBuffer)).to.equal(0);
+        }
+      });
+    });
+
+    it('can post mixed form data content with file and not providing optional file', () => {
+      const formData = {
+        username: 'test',
+        avatar: '@../tsconfig.json',
+      };
+      return verifyFileUploadRequest(`${basePath}/PostTest/MixedFormDataWithFilesContainsOptionalFile`, formData, (_err, res) => {
+        const file = res.body.avatar;
+        const packageJsonBuffer = readFileSync(resolve(__dirname, `../${file.originalname}`));
+        const returnedBuffer = Buffer.from(file.buffer);
+        expect(res.body.username).to.equal(formData.username);
+        expect(res.body.optionalAvatar).to.undefined;
+        expect(file).to.not.be.undefined;
+        expect(file.fieldname).to.be.not.undefined;
+        expect(file.originalname).to.be.not.undefined;
+        expect(file.encoding).to.be.not.undefined;
+        expect(file.mimetype).to.equal('application/json');
+        expect(Buffer.compare(returnedBuffer, packageJsonBuffer)).to.equal(0);
+      });
+    });
+
+    it('can post mixed form data content with file and provides optional file', () => {
+      const formData = {
+        username: 'test',
+        avatar: '@../tsconfig.json',
+        optionalAvatar: '@../package.json',
+      };
+      return verifyFileUploadRequest(`${basePath}/PostTest/MixedFormDataWithFilesContainsOptionalFile`, formData, (_err, res) => {
+        expect(res.body.username).to.equal(formData.username);
+        for (const fieldName of ['avatar', 'optionalAvatar']) {
+          const file = res.body[fieldName];
           const packageJsonBuffer = readFileSync(resolve(__dirname, `../${file.originalname}`));
           const returnedBuffer = Buffer.from(file.buffer);
           expect(file).to.not.be.undefined;

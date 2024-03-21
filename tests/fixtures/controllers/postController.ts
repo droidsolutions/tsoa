@@ -67,6 +67,23 @@ export class PostTestController {
     return files;
   }
 
+  @Post('ManyFilesInDifferentFields')
+  public async postWithDifferentFields(
+    @UploadedFile('file_a') fileA: File,
+    @UploadedFile('file_b') fileB: File,
+  ): Promise<File[]> {
+    return [fileA, fileB];
+  }
+
+  @Post('MixedFormDataWithFilesContainsOptionalFile')
+  public async mixedFormDataWithFile(
+    @FormField('username') username: string,
+    @UploadedFile('avatar') avatar: File,
+    @UploadedFile('optionalAvatar') optionalAvatar?: File,
+  ): Promise<{ username: string; avatar: File; optionalAvatar?: File; }> {
+    return { username, avatar, optionalAvatar };
+  }
+
   /**
    *
    * @param aFile File description of multipart
